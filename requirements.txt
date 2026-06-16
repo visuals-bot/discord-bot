@@ -1,3 +1,7 @@
 discord.py
 requests
 python-dotenv
+pillow
+opencv-python
+pycryptodome
+pypiwin32
